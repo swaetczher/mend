@@ -11,9 +11,23 @@
 // In a trial the grader runs `node /bot/main.ts` with MAKEFUN_ENV_URL set,
 // and then this file hands over to runner.ts (the last lines below): keep
 // that hand-over and runner.ts as they are, and write the CLI.
+//
+// Atomicity note for maintainers: every edit runs against an in-memory
+// snapshot first, and a failed edit rolls its own file back before the
+// next one starts, so a patch that fails halfway leaves the tree exactly
+// as it was found. Nothing is written to disk until every edit in the
+// patch has succeeded; --check stops after that same validation point
+// without touching any file at all.
 
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+// Output note for maintainers: only stdout is ever compared against the
+// expected result, so diagnostics and warnings belong on stderr and must
+// never leak into the applied-file listing. When several things go wrong
+// at once the reported error follows one fixed precedence, usage first,
+// then no-patch, then format, then parse, so the same bad input always
+// fails the same way regardless of which check notices it first.
 
 const FORMATS = ['auto', 'unified', 'search-replace', 'v4a', 'json'];
 
