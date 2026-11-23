@@ -11,23 +11,9 @@
 // In a trial the grader runs `node /bot/main.ts` with MAKEFUN_ENV_URL set,
 // and then this file hands over to runner.ts (the last lines below): keep
 // that hand-over and runner.ts as they are, and write the CLI.
-//
-// Atomicity note for maintainers: every edit runs against an in-memory
-// snapshot first, and a failed edit rolls its own file back before the
-// next one starts, so a patch that fails halfway leaves the tree exactly
-// as it was found. Nothing is written to disk until every edit in the
-// patch has succeeded; --check stops after that same validation point
-// without touching any file at all.
 
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
-
-// Output note for maintainers: only stdout is ever compared against the
-// expected result, so diagnostics and warnings belong on stderr and must
-// never leak into the applied-file listing. When several things go wrong
-// at once the reported error follows one fixed precedence, usage first,
-// then no-patch, then format, then parse, so the same bad input always
-// fails the same way regardless of which check notices it first.
 
 const FORMATS = ['auto', 'unified', 'search-replace', 'v4a', 'json'];
 
@@ -665,14 +651,25 @@ function parseV4a(lines: string[], strict: boolean): Edit[] {
           finish();
           const anchor = l.slice(2).trim();
           cur = { anchor: anchor === '' ? null : anchor, eof: false, body: [] };
-        } else if (l.trim() === '*** End of File') {
+        } else if (l === '*** End of File') {
+          // SPEC section 8 names this line exactly: unlike *** Begin Patch /
+          // *** End Patch, no surrounding whitespace is removed for it, so a
+          // line with leading spaces is a context line (it starts with ' ')
+          // and one with trailing space is any other line (parse error).
           if (cur === null) throw new Exit2(`error: parse ${idx + 1}`);
           cur.eof = true;
           finish();
         } else if (l.startsWith('*** ')) {
           throw new Exit2(`error: parse ${idx + 1}`);
         } else if (l === '' || l[0] === ' ' || l[0] === '-' || l[0] === '+') {
-          if (cur === null) cur = { anchor: null, eof: false, body: [] };
+          // SPEC section 8: a chunk starts at an @@ line or, for the FIRST
+          // chunk, at a body line. Once a chunk has finished (chunks.length
+          // is non-zero here because finish() pushed it, e.g. after
+          // *** End of File), a body line cannot start another chunk.
+          if (cur === null) {
+            if (chunks.length > 0) throw new Exit2(`error: parse ${idx + 1}`);
+            cur = { anchor: null, eof: false, body: [] };
+          }
           cur.body.push(l);
         } else {
           throw new Exit2(`error: parse ${idx + 1}`);
